@@ -69,8 +69,9 @@ class JsonlLog:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._f = open(path, "a", encoding="utf-8")
 
-    def event(self, kind: str, **data) -> None:
-        rec = {"ts": now_iso(), "event": kind, **data}
+    def event(self, event_kind: str, **data) -> None:
+        # nazwa parametru celowo nie "kind" — eventy przekazują kind=... w data
+        rec = {"ts": now_iso(), "event": event_kind, **data}
         self._f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         self._f.flush()
         os.fsync(self._f.fileno())
