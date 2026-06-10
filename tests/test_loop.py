@@ -6,6 +6,7 @@ from conftest import (
     VERIFY_ALWAYS_RED,
     VERIFY_GREEN,
     VERIFY_NO_BAD,
+    VERIFY_NO_BAD_VERBOSE,
 )
 
 
@@ -189,3 +190,71 @@ def test_on_escalation_skip_continues_to_next_task(tmp_path):
 
     loop_commits = [s for s in env.commit_subjects() if s.startswith("loop:")]
     assert any("good:done.txt" in s for s in loop_commits)
+
+
+# ---------------------------------------------------------------------------
+# (a) wyczerpane-proby: inna porazka w kazdej probie -> eskalacja po limicie
+# ---------------------------------------------------------------------------
+
+def test_exhausted_retries_escalates(tmp_path):
+    env = LoopEnv(
+        tmp_path, ["bad-vary"], VERIFY_NO_BAD_VERBOSE,
+        config_overrides={"max_retries_per_task": 3},
+    )
+    rc, out, err = env.run_loop()
+    assert rc == 5, f"stdout:\n{out}\nstderr:\n{err}"
+
+    # kazda proba miala INNA sygnature, wiec zadnego "brak-postepu" --
+    # agent dostal pelne max_retries_per_task prob
+    assert len(env.prompts()) == 3
+
+    assert "- [!] bad-vary" in env.plan_text()
+    assert "loop-eskalacja" in env.stash_list()
+    assert not (env.repo / "bad.txt").exists()
+    assert env.status_porcelain() == ""
+
+    reports = env.escalation_reports()
+    assert [r.name for r in reports] == ["ESKALACJA-001.md"]
+    assert "wyczerpane-proby" in reports[0].read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# (b) max_iterations: budzet mniejszy niz potrzeba zadan -> exit 3 + event
+# ---------------------------------------------------------------------------
+
+def test_max_iterations_budget_exhausted(tmp_path):
+    import json
+    env = LoopEnv(
+        tmp_path, ["good:done1.txt", "good:done2.txt"], VERIFY_GREEN,
+        config_overrides={"max_iterations": 1},
+    )
+    rc, out, err = env.run_loop()
+    assert rc == 3, f"stdout:\n{out}\nstderr:\n{err}"
+
+    # pierwsze zadanie zdazylo przejsc, drugie zostalo otwarte
+    plan = env.plan_text()
+    assert "- [x] good:done1.txt" in plan
+    assert "- [ ] good:done2.txt" in plan
+
+    log_lines = (env.repo / ".loop" / "loop_log.jsonl").read_text(
+        encoding="utf-8").strip().splitlines()
+    events = [json.loads(l) for l in log_lines]
+    exhausted = [e for e in events if e["event"] == "budget_exhausted"]
+    assert len(exhausted) == 1
+    assert exhausted[0]["kind"] == "iterations"
+
+
+# ---------------------------------------------------------------------------
+# (c) raport eskalacji zawiera referencje stash i numer proby
+# ---------------------------------------------------------------------------
+
+def test_escalation_report_contains_stash_ref_and_attempt(tmp_path):
+    env = LoopEnv(tmp_path, ["bad"], VERIFY_NO_BAD)
+    rc, out, err = env.run_loop()
+    assert rc == 5, f"stdout:\n{out}\nstderr:\n{err}"
+
+    report = env.escalation_reports()[0].read_text(encoding="utf-8")
+    assert "stash@{0}" in report          # referencja stash z praca agenta
+    assert "**Proba nr:** 2" in report.replace("ó", "o")  # eskalacja w 2. probie
+    # referencja z raportu istnieje naprawde
+    assert "stash@{0}" in env.stash_list() or env.stash_list().startswith("stash@{0}")

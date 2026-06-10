@@ -50,6 +50,15 @@ for op in task.split():
             "\n".join("linia %d tresci" % i for i in range(700)) + "\n",
             encoding="utf-8",
         )
+    elif op == "bad-vary":
+        # za kazda proba INNA tresc porazki (litery, nie cyfry — sygnatura
+        # porazki maskuje cyfry, wiec roznice musza byc niecyfrowe)
+        cnt = HERE / "vary_counter.txt"
+        n = int(cnt.read_text(encoding="utf-8")) if cnt.exists() else 0
+        cnt.write_text(str(n + 1), encoding="utf-8")
+        (cwd / "bad.txt").write_text(
+            "wariant-" + "abcdefgh"[n] + "\n", encoding="utf-8"
+        )
     elif op == "noop":
         pass
 '''
@@ -73,6 +82,17 @@ VERIFY_NO_BAD = [[
     "import os,sys; sys.exit(1 if os.path.exists('bad.txt') else 0)",
 ]]
 VERIFY_ALWAYS_RED = [[sys.executable, "-c", "import sys; sys.exit(1)"]]
+# Jak VERIFY_NO_BAD, ale wypisuje treść bad.txt — ogon porażki niesie wtedy
+# treść pliku, więc różne treści dają różne sygnatury porażki.
+VERIFY_NO_BAD_VERBOSE = [[
+    sys.executable,
+    "-c",
+    "import os,sys\n"
+    "if os.path.exists('bad.txt'):\n"
+    "    print(open('bad.txt', encoding='utf-8').read())\n"
+    "    sys.exit(1)\n"
+    "sys.exit(0)",
+]]
 
 
 class LoopEnv:
